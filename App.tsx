@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, ChevronLeft, ChevronRight, PieChart, LayoutDashboard, CalendarRange, List, Loader2, WifiOff, Settings } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, PieChart, LayoutDashboard, CalendarRange, List, Loader2, WifiOff, DownloadCloud } from 'lucide-react';
 import { Bill, MonthlyStats } from './types';
 import { GlassCard } from './components/ui/GlassCard';
 import { BillItem } from './components/BillItem';
@@ -46,7 +46,8 @@ const App: React.FC = () => {
         dueDate: item.due_date,
         isPaid: item.is_paid,
         isRecurring: item.is_recurring,
-        category: item.category
+        category: item.category,
+        seriesId: item.series_id // Map database column to type
       }));
 
       setBills(formattedBills);
@@ -119,6 +120,33 @@ const App: React.FC = () => {
     });
   };
 
+  const handleExportCSV = () => {
+    if (bills.length === 0) {
+      alert("Brak danych do eksportu.");
+      return;
+    }
+
+    const headers = ["Nazwa", "Kwota", "Data", "Kategoria", "Status", "Powtarzalny"];
+    const csvContent = [
+      headers.join(","),
+      ...bills.map(bill => {
+        const date = new Date(bill.dueDate).toLocaleDateString('pl-PL');
+        const status = bill.isPaid ? "Zapłacone" : "Do zapłaty";
+        const recurring = bill.isRecurring ? "Tak" : "Nie";
+        return `"${bill.name}",${bill.amount},${date},${bill.category},${status},${recurring}`;
+      })
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `backup_rachunki_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const toggleBillPaid = async (id: string) => {
     if (!isSupabaseConfigured) return;
 
@@ -177,19 +205,24 @@ const App: React.FC = () => {
         return;
     }
 
-    // Przygotowanie danych do wysyłki (format bazy danych snake_case)
+    // Helper to format payload for DB
     const preparePayload = (b: Bill) => ({
         name: b.name,
         amount: b.amount,
         due_date: b.dueDate,
         is_paid: b.isPaid,
         is_recurring: b.isRecurring,
-        category: b.category
+        category: b.category,
+        series_id: b.seriesId || null
     });
 
     try {
         if (isNew) {
+            // --- NEW BILL LOGIC ---
             if (createSeries) {
+                // Generate a unique Series ID for this batch
+                const seriesId = crypto.randomUUID();
+                
                 // Create for next 12 months including current
                 const newBillsPayload = [];
                 const startDate = new Date(billData.dueDate);
@@ -199,16 +232,15 @@ const App: React.FC = () => {
                     nextDate.setMonth(startDate.getMonth() + i);
                     
                     newBillsPayload.push({
-                        ...preparePayload(billData),
+                        ...preparePayload({ ...billData, seriesId }), // Assign generated Series ID
                         due_date: nextDate.toISOString(),
-                        is_paid: i === 0 ? billData.isPaid : false // Only first one might be paid
+                        is_paid: i === 0 ? billData.isPaid : false
                     });
                 }
                 
                 const { data, error } = await supabase.from('bills').insert(newBillsPayload).select();
                 if (error) throw error;
                 
-                // Refresh local state with real data from DB (with real IDs)
                 if (data) {
                     const addedBills = data.map((item: any) => ({
                         id: item.id,
@@ -217,27 +249,96 @@ const App: React.FC = () => {
                         dueDate: item.due_date,
                         isPaid: item.is_paid,
                         isRecurring: item.is_recurring,
-                        category: item.category
+                        category: item.category,
+                        seriesId: item.series_id
                     }));
                     setBills(prev => [...prev, ...addedBills]);
                 }
 
             } else {
+                // Single new bill
                 const { data, error } = await supabase.from('bills').insert(preparePayload(billData)).select();
                 if (error) throw error;
                 if (data) {
                      const addedBill = {
                         ...billData,
-                        id: data[0].id // Use real ID from DB
+                        id: data[0].id,
+                        seriesId: data[0].series_id
                      };
                      setBills(prev => [...prev, addedBill]);
                 }
             }
         } else {
-            // Update
+            // --- EDIT EXISTING BILL LOGIC ---
+            
+            const originalBill = bills.find(b => b.id === billData.id);
+            const wasRecurring = originalBill?.isRecurring;
+            const isNowRecurring = billData.isRecurring;
+
+            // Scenario: User turned OFF recurring (was true -> now false)
+            if (wasRecurring && !isNowRecurring) {
+                const confirmed = confirm("Wyłączyłeś opcję 'Powtarzalny'. Czy chcesz usunąć wszystkie przyszłe rachunki z tej serii?");
+                
+                if (confirmed) {
+                    // 1. Identify future bills to delete
+                    // Strategy A: Use seriesId if available (Best)
+                    // Strategy B: Fallback to Name + Amount + Date > Current (For legacy data)
+                    
+                    let deleteQuery = supabase.from('bills').delete();
+                    const currentDueDate = billData.dueDate;
+
+                    if (originalBill?.seriesId) {
+                        deleteQuery = deleteQuery
+                            .eq('series_id', originalBill.seriesId)
+                            .gt('due_date', currentDueDate);
+                    } else {
+                        // Fallback strategy for old data without series_id
+                        deleteQuery = deleteQuery
+                            .eq('name', originalBill?.name)
+                            .eq('amount', originalBill?.amount)
+                            .gt('due_date', currentDueDate);
+                    }
+
+                    // Execute Delete
+                    const { error: deleteError } = await deleteQuery;
+                    if (deleteError) throw deleteError;
+
+                    // Update local state by removing future bills
+                    setBills(prev => prev.filter(b => {
+                        // Keep current edited bill
+                        if (b.id === billData.id) return true;
+                        
+                        const bDate = new Date(b.dueDate).getTime();
+                        const cDate = new Date(currentDueDate).getTime();
+                        
+                        // If it's in the past or same time, keep it
+                        if (bDate <= cDate) return true;
+
+                        // Check if it matches the series we just deleted
+                        if (originalBill?.seriesId) {
+                            return b.seriesId !== originalBill.seriesId;
+                        } else {
+                            // Fallback match
+                            return !(b.name === originalBill?.name && b.amount === originalBill?.amount);
+                        }
+                    }));
+                    
+                    // Also clear seriesId from the current bill since it's now solitary
+                    billData.seriesId = undefined;
+                }
+            }
+
+            // Update the actual bill row
+            const payload = preparePayload(billData);
+            
+            // If we broke the series, explicitly set series_id to null in DB
+            if (wasRecurring && !isNowRecurring) {
+                payload.series_id = null;
+            }
+
             const { error } = await supabase
                 .from('bills')
-                .update(preparePayload(billData))
+                .update(payload)
                 .eq('id', billData.id);
             
             if (error) throw error;
@@ -276,9 +377,18 @@ const App: React.FC = () => {
         {/* Header Section */}
         <header className="pt-12 px-6 pb-6 sticky top-0 z-20 bg-black/5 backdrop-blur-md border-b border-white/5">
           <div className="flex items-center justify-between mb-6">
-            <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
-              LiquidBills
-            </h1>
+            <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
+                LiquidBills
+                </h1>
+                <button 
+                    onClick={handleExportCSV}
+                    className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+                    title="Pobierz backup CSV"
+                >
+                    <DownloadCloud size={18} />
+                </button>
+            </div>
             
             {/* View Mode Toggle */}
             <div className="flex bg-white/5 p-1 rounded-full border border-white/10">

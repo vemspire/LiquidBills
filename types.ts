@@ -1,3 +1,4 @@
+
 export interface Bill {
   id: string;
   name: string;
@@ -6,6 +7,7 @@ export interface Bill {
   isPaid: boolean;
   isRecurring: boolean;
   category: BillCategory;
+  seriesId?: string; // Optional ID linking recurring bills together
 }
 
 export enum BillCategory {
