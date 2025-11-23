@@ -1,31 +1,11 @@
-
 import { createClient } from '@supabase/supabase-js';
 
-// Funkcja pomocnicza do bezpiecznego pobierania zmiennych środowiskowych
-// Zapobiega błędowi "Cannot read properties of undefined" jeśli import.meta.env nie istnieje
-const getEnv = (key: string) => {
-  try {
-    // @ts-ignore
-    return import.meta.env?.[key] || '';
-  } catch (e) {
-    return '';
-  }
-};
+// W wersji mobilnej (.ipa) nie mamy dostępu do zmiennych środowiskowych Netlify w czasie rzeczywistym.
+// Klucze zostały wpisane bezpośrednio, aby zapewnić połączenie z bazą z poziomu telefonu.
 
-const supabaseUrl = getEnv('VITE_SUPABASE_URL');
-const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
+const supabaseUrl = 'https://vwxkvnvlwugcqppwctff.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3eGt2bnZsd3VnY3FwcHdjdGZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MTI4NjksImV4cCI6MjA3OTM4ODg2OX0.TKZsrQgMsr7B2VLtesd8eZcj9bqd-XgJ2KRv270n7Jo';
 
-// Aby aplikacja nie "wybuchła" (White Screen of Death) przy starcie, jeśli brakuje kluczy:
-// 1. Sprawdzamy czy zmienne są puste.
-// 2. Jeśli tak, podajemy "fake" URL, który przejdzie walidację konstruktora, ale zapytanie sieciowe zwróci błąd (który obsłużymy w UI).
-// Dzięki temu moduł eksportuje obiekt, a App.tsx może się wyrenderować.
+export const isSupabaseConfigured = true;
 
-const validUrl = supabaseUrl && supabaseUrl.startsWith('http') 
-  ? supabaseUrl 
-  : 'https://placeholder.supabase.co';
-
-const validKey = supabaseAnonKey || 'placeholder-key';
-
-export const isSupabaseConfigured = !!supabaseUrl && !!supabaseAnonKey;
-
-export const supabase = createClient(validUrl, validKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
