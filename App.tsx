@@ -16,7 +16,7 @@ const App: React.FC = () => {
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true); // Initial load (first time ever)
   const [isSyncing, setIsSyncing] = useState(false); // Background sync
-  const [syncSuccess, setSyncSuccess] = useState(false); // Animation trigger
+  const [syncSuccess, setSyncSuccess] = useState(false); // Persistent success state
   const [error, setError] = useState<string | null>(null);
   
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -47,7 +47,9 @@ const App: React.FC = () => {
       if (!isBackgroundRefresh) setLoading(true);
       setIsSyncing(true);
       setError(null);
-      setSyncSuccess(false);
+      
+      // Note: We don't reset syncSuccess here immediately to avoid icon flickering 
+      // if the user hits refresh manually. We update it at the end.
 
       if (!isSupabaseConfigured) {
         throw new Error("MISSING_CONFIG");
@@ -71,20 +73,25 @@ const App: React.FC = () => {
         seriesId: item.series_id
       }));
 
-      // Update State
-      setBills(formattedBills);
-      
-      // Update Cache
-      localStorage.setItem(CACHE_KEY, JSON.stringify(formattedBills));
+      // INTELLIGENT UPDATE:
+      // Compare new data with what we currently have in localStorage (source of truth for current view).
+      // If strings match, data is identical. DO NOT call setBills to avoid React re-render/flash.
+      const currentCache = localStorage.getItem(CACHE_KEY);
+      const newCache = JSON.stringify(formattedBills);
 
-      // Trigger Success Animation
-      if (isBackgroundRefresh) {
-          setSyncSuccess(true);
-          setTimeout(() => setSyncSuccess(false), 3000);
+      if (currentCache !== newCache) {
+          setBills(formattedBills);
+          localStorage.setItem(CACHE_KEY, newCache);
+      } else {
+          console.log("Data is up to date, skipping render update.");
       }
+
+      // Mark sync as successful permanently (until next error or sync start)
+      setSyncSuccess(true);
 
     } catch (err: any) {
       console.error('Error fetching bills:', err);
+      setSyncSuccess(false); // Clear success icon on error
       
       if (err.message === "MISSING_CONFIG") {
           setError("Brak konfiguracji bazy danych.");
@@ -209,6 +216,7 @@ const App: React.FC = () => {
         .eq('id', id);
 
       if (error) throw error;
+      setSyncSuccess(true);
     } catch (err) {
       console.error("Error updating status:", err);
       // Revert if error
@@ -217,6 +225,7 @@ const App: React.FC = () => {
       );
       setBills(revertedBills);
       localStorage.setItem(CACHE_KEY, JSON.stringify(revertedBills));
+      setSyncSuccess(false);
       alert("Błąd synchronizacji. Sprawdź połączenie.");
     }
   };
@@ -238,10 +247,12 @@ const App: React.FC = () => {
             .eq('id', id);
         
         if (error) throw error;
+        setSyncSuccess(true);
     } catch (err) {
         console.error("Error deleting:", err);
         setBills(previousBills);
         localStorage.setItem(CACHE_KEY, JSON.stringify(previousBills));
+        setSyncSuccess(false);
         alert("Błąd podczas usuwania.");
     }
   };
@@ -251,6 +262,10 @@ const App: React.FC = () => {
         alert("Brak połączenia z bazą. Nie można zapisać.");
         return;
     }
+    
+    // Optimistic UI for create/edit is tricky because we need real IDs from DB for series.
+    // For now, we rely on the DB return, but we set syncing state.
+    setIsSyncing(true);
 
     const preparePayload = (b: Bill) => ({
         name: b.name,
@@ -372,9 +387,13 @@ const App: React.FC = () => {
             setBills(finalBills);
             localStorage.setItem(CACHE_KEY, JSON.stringify(finalBills));
         }
+        setSyncSuccess(true);
     } catch (err) {
         console.error("Error saving bill:", err);
+        setSyncSuccess(false);
         alert("Wystąpił błąd podczas zapisywania.");
+    } finally {
+        setIsSyncing(false);
     }
   };
 
@@ -406,7 +425,7 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
-                Liquid Bills
+                LiquidBills
                 </h1>
                 
                 <div className="flex gap-2">
@@ -415,9 +434,11 @@ const App: React.FC = () => {
                         {isSyncing ? (
                             <RefreshCw size={14} className="text-blue-400 animate-spin" />
                         ) : syncSuccess ? (
-                            <CheckCircle2 size={16} className="text-green-400 animate-[blob_0.5s_ease-out]" />
+                            <CheckCircle2 size={16} className="text-green-400" />
+                        ) : error ? (
+                            <WifiOff size={14} className="text-red-400" />
                         ) : (
-                            <div className="w-2 h-2 rounded-full bg-white/20" />
+                             <div className="w-2 h-2 rounded-full bg-white/20" />
                         )}
                     </div>
 
@@ -449,7 +470,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Date Selector */}
-          <div className={`flex items-center justify-between bg-white/5 p-1 rounded-2xl border border-white/10 transition-colors duration-500 ${syncSuccess ? 'border-green-500/30 bg-green-500/5' : ''}`}>
+          <div className={`flex items-center justify-between bg-white/5 p-1 rounded-2xl border border-white/10 transition-colors duration-500`}>
             <button onClick={handlePrev} className="p-2 rounded-xl hover:bg-white/10 transition-colors">
               <ChevronLeft size={20} className="text-white/70" />
             </button>
@@ -467,7 +488,7 @@ const App: React.FC = () => {
                <Loader2 className="animate-spin" size={32} />
                <span>Ładowanie z chmury...</span>
            </div> 
-        ) : error ? (
+        ) : error && bills.length === 0 ? (
            <div className="flex flex-col items-center justify-center h-[50vh] text-red-400 gap-4 p-6 text-center">
                <div className="p-4 bg-red-500/10 rounded-full border border-red-500/20"><WifiOff size={32} /></div>
                <h3 className="text-xl font-bold text-white">Błąd Połączenia</h3>
@@ -522,10 +543,9 @@ const App: React.FC = () => {
                 </div>
 
                 {/* List Section */}
-                <div className="px-6 mt-8 animate-slide-up">
+                <div className="px-6 mt-8">
                 <h2 className="text-sm font-bold text-white/40 uppercase tracking-widest mb-4 ml-1 flex justify-between">
                     <span>Twoje Rachunki</span>
-                    {syncSuccess && <span className="text-green-400 text-[10px] animate-pulse">Zaktualizowano</span>}
                 </h2>
                 
                 {filteredBills.length === 0 ? (
@@ -558,7 +578,7 @@ const App: React.FC = () => {
         )}
 
         {/* Floating Action Button - Only in Month View */}
-        {viewMode === 'month' && !loading && !error && (
+        {viewMode === 'month' && !loading && (
             <div className="fixed bottom-8 left-0 right-0 flex justify-center z-40 pointer-events-none">
                 <button 
                     onClick={openAddModal}
