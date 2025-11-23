@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, ChevronLeft, ChevronRight, PieChart, LayoutDashboard, CalendarRange, List, Loader2, WifiOff, DownloadCloud } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, PieChart, LayoutDashboard, CalendarRange, List, Loader2, WifiOff, DownloadCloud, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Bill, MonthlyStats } from './types';
 import { GlassCard } from './components/ui/GlassCard';
 import { BillItem } from './components/BillItem';
@@ -10,10 +10,13 @@ import { formatCurrency, getMonthYearLabel } from './utils';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 type ViewMode = 'month' | 'year';
+const CACHE_KEY = 'liquid_bills_local_cache';
 
 const App: React.FC = () => {
   const [bills, setBills] = useState<Bill[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Initial load (first time ever)
+  const [isSyncing, setIsSyncing] = useState(false); // Background sync
+  const [syncSuccess, setSyncSuccess] = useState(false); // Animation trigger
   const [error, setError] = useState<string | null>(null);
   
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -21,12 +24,30 @@ const App: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
 
-  // --- Supabase Integration ---
+  // --- Data Loading Logic ---
 
-  const fetchBills = async () => {
+  const loadFromCache = () => {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+        try {
+            const parsed = JSON.parse(cached);
+            setBills(parsed);
+            setLoading(false); // Content available, stop blocking loader
+            return true;
+        } catch (e) {
+            console.error("Cache parse error", e);
+            return false;
+        }
+    }
+    return false;
+  };
+
+  const fetchBills = async (isBackgroundRefresh = false) => {
     try {
-      setLoading(true);
+      if (!isBackgroundRefresh) setLoading(true);
+      setIsSyncing(true);
       setError(null);
+      setSyncSuccess(false);
 
       if (!isSupabaseConfigured) {
         throw new Error("MISSING_CONFIG");
@@ -47,27 +68,46 @@ const App: React.FC = () => {
         isPaid: item.is_paid,
         isRecurring: item.is_recurring,
         category: item.category,
-        seriesId: item.series_id // Map database column to type
+        seriesId: item.series_id
       }));
 
+      // Update State
       setBills(formattedBills);
+      
+      // Update Cache
+      localStorage.setItem(CACHE_KEY, JSON.stringify(formattedBills));
+
+      // Trigger Success Animation
+      if (isBackgroundRefresh) {
+          setSyncSuccess(true);
+          setTimeout(() => setSyncSuccess(false), 3000);
+      }
+
     } catch (err: any) {
       console.error('Error fetching bills:', err);
       
       if (err.message === "MISSING_CONFIG") {
           setError("Brak konfiguracji bazy danych.");
       } else if (err.message && (err.message.includes('fetch') || err.message.includes('network'))) {
-          setError("Problem z połączeniem internetowym.");
+          // If network fails but we have cache, don't show full screen error, just a toast/log
+          if (bills.length === 0) {
+             setError("Problem z połączeniem internetowym.");
+          }
       } else {
-          setError("Nie udało się pobrać danych. Sprawdź konfigurację Supabase.");
+          setError("Nie udało się pobrać danych.");
       }
     } finally {
       setLoading(false);
+      setIsSyncing(false);
     }
   };
 
   useEffect(() => {
-    fetchBills();
+    // 1. Try to load from cache immediately
+    const hasCache = loadFromCache();
+    
+    // 2. Fetch fresh data (background if cache exists, foreground if not)
+    fetchBills(hasCache);
   }, []);
 
   // Filter bills for the currently selected month and year
@@ -155,10 +195,12 @@ const App: React.FC = () => {
 
     const newStatus = !billToUpdate.isPaid;
 
-    // Optimistic Update (natychmiastowa zmiana w UI)
-    setBills(prev => prev.map(bill => 
+    // Optimistic Update
+    const updatedBills = bills.map(bill => 
       bill.id === id ? { ...bill, isPaid: newStatus } : bill
-    ));
+    );
+    setBills(updatedBills);
+    localStorage.setItem(CACHE_KEY, JSON.stringify(updatedBills)); // Update Cache immediately
 
     try {
       const { error } = await supabase
@@ -170,9 +212,11 @@ const App: React.FC = () => {
     } catch (err) {
       console.error("Error updating status:", err);
       // Revert if error
-      setBills(prev => prev.map(bill => 
+      const revertedBills = bills.map(bill => 
         bill.id === id ? { ...bill, isPaid: !newStatus } : bill
-      ));
+      );
+      setBills(revertedBills);
+      localStorage.setItem(CACHE_KEY, JSON.stringify(revertedBills));
       alert("Błąd synchronizacji. Sprawdź połączenie.");
     }
   };
@@ -182,7 +226,9 @@ const App: React.FC = () => {
 
     // Optimistic delete
     const previousBills = [...bills];
-    setBills(prev => prev.filter(b => b.id !== id));
+    const newBills = bills.filter(b => b.id !== id);
+    setBills(newBills);
+    localStorage.setItem(CACHE_KEY, JSON.stringify(newBills));
     setIsModalOpen(false);
 
     try {
@@ -195,6 +241,7 @@ const App: React.FC = () => {
     } catch (err) {
         console.error("Error deleting:", err);
         setBills(previousBills);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(previousBills));
         alert("Błąd podczas usuwania.");
     }
   };
@@ -205,7 +252,6 @@ const App: React.FC = () => {
         return;
     }
 
-    // Helper to format payload for DB
     const preparePayload = (b: Bill) => ({
         name: b.name,
         amount: b.amount,
@@ -218,12 +264,8 @@ const App: React.FC = () => {
 
     try {
         if (isNew) {
-            // --- NEW BILL LOGIC ---
             if (createSeries) {
-                // Generate a unique Series ID for this batch
                 const seriesId = crypto.randomUUID();
-                
-                // Create for next 12 months including current
                 const newBillsPayload = [];
                 const startDate = new Date(billData.dueDate);
                 
@@ -232,7 +274,7 @@ const App: React.FC = () => {
                     nextDate.setMonth(startDate.getMonth() + i);
                     
                     newBillsPayload.push({
-                        ...preparePayload({ ...billData, seriesId }), // Assign generated Series ID
+                        ...preparePayload({ ...billData, seriesId }),
                         due_date: nextDate.toISOString(),
                         is_paid: i === 0 ? billData.isPaid : false
                     });
@@ -252,11 +294,12 @@ const App: React.FC = () => {
                         category: item.category,
                         seriesId: item.series_id
                     }));
-                    setBills(prev => [...prev, ...addedBills]);
+                    const newTotal = [...bills, ...addedBills];
+                    setBills(newTotal);
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(newTotal));
                 }
 
             } else {
-                // Single new bill
                 const { data, error } = await supabase.from('bills').insert(preparePayload(billData)).select();
                 if (error) throw error;
                 if (data) {
@@ -265,25 +308,21 @@ const App: React.FC = () => {
                         id: data[0].id,
                         seriesId: data[0].series_id
                      };
-                     setBills(prev => [...prev, addedBill]);
+                     const newTotal = [...bills, addedBill];
+                     setBills(newTotal);
+                     localStorage.setItem(CACHE_KEY, JSON.stringify(newTotal));
                 }
             }
         } else {
-            // --- EDIT EXISTING BILL LOGIC ---
-            
             const originalBill = bills.find(b => b.id === billData.id);
             const wasRecurring = originalBill?.isRecurring;
             const isNowRecurring = billData.isRecurring;
+            let currentBills = [...bills];
 
-            // Scenario: User turned OFF recurring (was true -> now false)
             if (wasRecurring && !isNowRecurring) {
                 const confirmed = confirm("Wyłączyłeś opcję 'Powtarzalny'. Czy chcesz usunąć wszystkie przyszłe rachunki z tej serii?");
                 
                 if (confirmed) {
-                    // 1. Identify future bills to delete
-                    // Strategy A: Use seriesId if available (Best)
-                    // Strategy B: Fallback to Name + Amount + Date > Current (For legacy data)
-                    
                     let deleteQuery = supabase.from('bills').delete();
                     const currentDueDate = billData.dueDate;
 
@@ -292,46 +331,32 @@ const App: React.FC = () => {
                             .eq('series_id', originalBill.seriesId)
                             .gt('due_date', currentDueDate);
                     } else {
-                        // Fallback strategy for old data without series_id
                         deleteQuery = deleteQuery
                             .eq('name', originalBill?.name)
                             .eq('amount', originalBill?.amount)
                             .gt('due_date', currentDueDate);
                     }
 
-                    // Execute Delete
                     const { error: deleteError } = await deleteQuery;
                     if (deleteError) throw deleteError;
 
-                    // Update local state by removing future bills
-                    setBills(prev => prev.filter(b => {
-                        // Keep current edited bill
+                    currentBills = currentBills.filter(b => {
                         if (b.id === billData.id) return true;
-                        
                         const bDate = new Date(b.dueDate).getTime();
                         const cDate = new Date(currentDueDate).getTime();
-                        
-                        // If it's in the past or same time, keep it
                         if (bDate <= cDate) return true;
-
-                        // Check if it matches the series we just deleted
                         if (originalBill?.seriesId) {
                             return b.seriesId !== originalBill.seriesId;
                         } else {
-                            // Fallback match
                             return !(b.name === originalBill?.name && b.amount === originalBill?.amount);
                         }
-                    }));
+                    });
                     
-                    // Also clear seriesId from the current bill since it's now solitary
                     billData.seriesId = undefined;
                 }
             }
 
-            // Update the actual bill row
             const payload = preparePayload(billData);
-            
-            // If we broke the series, explicitly set series_id to null in DB
             if (wasRecurring && !isNowRecurring) {
                 payload.series_id = null;
             }
@@ -343,7 +368,9 @@ const App: React.FC = () => {
             
             if (error) throw error;
 
-            setBills(prev => prev.map(b => b.id === billData.id ? billData : b));
+            const finalBills = currentBills.map(b => b.id === billData.id ? billData : b);
+            setBills(finalBills);
+            localStorage.setItem(CACHE_KEY, JSON.stringify(finalBills));
         }
     } catch (err) {
         console.error("Error saving bill:", err);
@@ -375,19 +402,33 @@ const App: React.FC = () => {
       <div className="relative z-10 max-w-lg mx-auto pb-24">
         
         {/* Header Section */}
-        <header className="pt-12 px-6 pb-6 sticky top-0 z-20 bg-black/5 backdrop-blur-md border-b border-white/5">
+        <header className="pt-12 px-6 pb-6 sticky top-0 z-20 bg-black/5 backdrop-blur-md border-b border-white/5 transition-all">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
                 Liquid Bills
                 </h1>
-                <button 
-                    onClick={handleExportCSV}
-                    className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-colors"
-                    title="Pobierz backup CSV"
-                >
-                    <DownloadCloud size={18} />
-                </button>
+                
+                <div className="flex gap-2">
+                    {/* Sync Indicator */}
+                    <div className="w-8 h-8 flex items-center justify-center rounded-full bg-white/5">
+                        {isSyncing ? (
+                            <RefreshCw size={14} className="text-blue-400 animate-spin" />
+                        ) : syncSuccess ? (
+                            <CheckCircle2 size={16} className="text-green-400 animate-[blob_0.5s_ease-out]" />
+                        ) : (
+                            <div className="w-2 h-2 rounded-full bg-white/20" />
+                        )}
+                    </div>
+
+                    <button 
+                        onClick={handleExportCSV}
+                        className="p-2 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+                        title="Pobierz backup CSV"
+                    >
+                        <DownloadCloud size={18} />
+                    </button>
+                </div>
             </div>
             
             {/* View Mode Toggle */}
@@ -408,7 +449,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Date Selector */}
-          <div className="flex items-center justify-between bg-white/5 p-1 rounded-2xl border border-white/10">
+          <div className={`flex items-center justify-between bg-white/5 p-1 rounded-2xl border border-white/10 transition-colors duration-500 ${syncSuccess ? 'border-green-500/30 bg-green-500/5' : ''}`}>
             <button onClick={handlePrev} className="p-2 rounded-xl hover:bg-white/10 transition-colors">
               <ChevronLeft size={20} className="text-white/70" />
             </button>
@@ -482,8 +523,9 @@ const App: React.FC = () => {
 
                 {/* List Section */}
                 <div className="px-6 mt-8 animate-slide-up">
-                <h2 className="text-sm font-bold text-white/40 uppercase tracking-widest mb-4 ml-1">
-                    Twoje Rachunki
+                <h2 className="text-sm font-bold text-white/40 uppercase tracking-widest mb-4 ml-1 flex justify-between">
+                    <span>Twoje Rachunki</span>
+                    {syncSuccess && <span className="text-green-400 text-[10px] animate-pulse">Zaktualizowano</span>}
                 </h2>
                 
                 {filteredBills.length === 0 ? (
