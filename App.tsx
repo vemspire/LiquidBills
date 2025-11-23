@@ -425,7 +425,7 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
-                LiquidBills
+                Liquid Bills
                 </h1>
                 
                 <div className="flex gap-2">
