@@ -126,7 +126,15 @@ const App: React.FC = () => {
         billDate.getMonth() === currentDate.getMonth() &&
         billDate.getFullYear() === currentDate.getFullYear()
       );
-    }).sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+    }).sort((a, b) => {
+        // 1. Primary Sort: Category (Alphabetical)
+        const categoryCompare = a.category.localeCompare(b.category);
+        if (categoryCompare !== 0) {
+            return categoryCompare;
+        }
+        // 2. Secondary Sort: Due Date (Ascending)
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+    });
   }, [bills, currentDate]);
 
   // Calculate statistics
