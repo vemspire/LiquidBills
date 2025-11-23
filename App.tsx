@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, ChevronLeft, ChevronRight, PieChart, LayoutDashboard, CalendarRange, List, Loader2, WifiOff, DownloadCloud, RefreshCw, CheckCircle2 } from 'lucide-react';
-import { Bill, MonthlyStats } from './types';
+import { Bill, MonthlyStats, BillFrequency } from './types';
 import { GlassCard } from './components/ui/GlassCard';
 import { BillItem } from './components/BillItem';
 import { EditModal } from './components/EditModal';
@@ -69,6 +69,7 @@ const App: React.FC = () => {
         dueDate: item.due_date,
         isPaid: item.is_paid,
         isRecurring: item.is_recurring,
+        frequency: item.frequency,
         category: item.category,
         seriesId: item.series_id
       }));
@@ -257,14 +258,12 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveBill = async (billData: Bill, isNew: boolean, createSeries: boolean) => {
+  const handleSaveBill = async (billData: Bill, isNew: boolean, createSeries: boolean, updateFuture: boolean) => {
     if (!isSupabaseConfigured) {
         alert("Brak połączenia z bazą. Nie można zapisać.");
         return;
     }
     
-    // Optimistic UI for create/edit is tricky because we need real IDs from DB for series.
-    // For now, we rely on the DB return, but we set syncing state.
     setIsSyncing(true);
 
     const preparePayload = (b: Bill) => ({
@@ -273,6 +272,7 @@ const App: React.FC = () => {
         due_date: b.dueDate,
         is_paid: b.isPaid,
         is_recurring: b.isRecurring,
+        frequency: b.frequency,
         category: b.category,
         series_id: b.seriesId || null
     });
@@ -283,10 +283,15 @@ const App: React.FC = () => {
                 const seriesId = crypto.randomUUID();
                 const newBillsPayload = [];
                 const startDate = new Date(billData.dueDate);
+                const freq = billData.frequency || BillFrequency.MONTHLY;
                 
-                for (let i = 0; i < 12; i++) {
+                // Calculate roughly 1 year worth of bills based on frequency
+                // Monthly = 12, Quarterly = 4, Semiannual = 2, Annual = 2 (Just to be safe for a year view)
+                const count = Math.ceil(12 / freq) + 1; // +1 to cover edge cases
+
+                for (let i = 0; i < count; i++) {
                     const nextDate = new Date(startDate);
-                    nextDate.setMonth(startDate.getMonth() + i);
+                    nextDate.setMonth(startDate.getMonth() + (i * freq));
                     
                     newBillsPayload.push({
                         ...preparePayload({ ...billData, seriesId }),
@@ -306,6 +311,7 @@ const App: React.FC = () => {
                         dueDate: item.due_date,
                         isPaid: item.is_paid,
                         isRecurring: item.is_recurring,
+                        frequency: item.frequency,
                         category: item.category,
                         seriesId: item.series_id
                     }));
@@ -329,11 +335,13 @@ const App: React.FC = () => {
                 }
             }
         } else {
+            // EDIT EXISTING
             const originalBill = bills.find(b => b.id === billData.id);
             const wasRecurring = originalBill?.isRecurring;
             const isNowRecurring = billData.isRecurring;
             let currentBills = [...bills];
 
+            // 1. Handle Turning OFF Recurring
             if (wasRecurring && !isNowRecurring) {
                 const confirmed = confirm("Wyłączyłeś opcję 'Powtarzalny'. Czy chcesz usunąć wszystkie przyszłe rachunki z tej serii?");
                 
@@ -346,6 +354,7 @@ const App: React.FC = () => {
                             .eq('series_id', originalBill.seriesId)
                             .gt('due_date', currentDueDate);
                     } else {
+                        // Fallback logic if series_id missing
                         deleteQuery = deleteQuery
                             .eq('name', originalBill?.name)
                             .eq('amount', originalBill?.amount)
@@ -355,6 +364,7 @@ const App: React.FC = () => {
                     const { error: deleteError } = await deleteQuery;
                     if (deleteError) throw deleteError;
 
+                    // Update Local State
                     currentBills = currentBills.filter(b => {
                         if (b.id === billData.id) return true;
                         const bDate = new Date(b.dueDate).getTime();
@@ -362,30 +372,58 @@ const App: React.FC = () => {
                         if (bDate <= cDate) return true;
                         if (originalBill?.seriesId) {
                             return b.seriesId !== originalBill.seriesId;
-                        } else {
-                            return !(b.name === originalBill?.name && b.amount === originalBill?.amount);
                         }
+                        return true;
                     });
                     
-                    billData.seriesId = undefined;
+                    billData.seriesId = undefined; // Break link
                 }
             }
 
-            const payload = preparePayload(billData);
-            if (wasRecurring && !isNowRecurring) {
-                payload.series_id = null;
+            // 2. Handle Update Series (e.g. Price Change)
+            if (wasRecurring && isNowRecurring && updateFuture && originalBill?.seriesId) {
+                 // Update ALL bills in series that have date >= current bill date
+                 const { error } = await supabase
+                    .from('bills')
+                    .update({
+                        name: billData.name,
+                        amount: billData.amount,
+                        category: billData.category,
+                        frequency: billData.frequency
+                    })
+                    .eq('series_id', originalBill.seriesId)
+                    .gte('due_date', billData.dueDate); // Only future & current
+                
+                if (error) throw error;
+
+                // Update Local State
+                currentBills = currentBills.map(b => {
+                    // Check if part of series and date is same or future
+                    if (b.seriesId === originalBill.seriesId && new Date(b.dueDate) >= new Date(billData.dueDate)) {
+                         return { ...b, name: billData.name, amount: billData.amount, category: billData.category, frequency: billData.frequency };
+                    }
+                    return b;
+                });
+            } else {
+                // Update SINGLE Bill
+                const payload = preparePayload(billData);
+                if (wasRecurring && !isNowRecurring) {
+                    payload.series_id = null;
+                }
+
+                const { error } = await supabase
+                    .from('bills')
+                    .update(payload)
+                    .eq('id', billData.id);
+                
+                if (error) throw error;
+
+                 // Update Local State Single
+                 currentBills = currentBills.map(b => b.id === billData.id ? billData : b);
             }
 
-            const { error } = await supabase
-                .from('bills')
-                .update(payload)
-                .eq('id', billData.id);
-            
-            if (error) throw error;
-
-            const finalBills = currentBills.map(b => b.id === billData.id ? billData : b);
-            setBills(finalBills);
-            localStorage.setItem(CACHE_KEY, JSON.stringify(finalBills));
+            setBills(currentBills);
+            localStorage.setItem(CACHE_KEY, JSON.stringify(currentBills));
         }
         setSyncSuccess(true);
     } catch (err) {
@@ -598,6 +636,7 @@ const App: React.FC = () => {
         onDelete={handleDeleteBill}
         initialBill={editingBill}
         currentDateContext={currentDate}
+        existingBills={bills}
       />
     </div>
   );

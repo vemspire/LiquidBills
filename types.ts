@@ -6,8 +6,16 @@ export interface Bill {
   dueDate: string; // ISO String for easier storage
   isPaid: boolean;
   isRecurring: boolean;
+  frequency?: BillFrequency; // New field for recurrence type
   category: BillCategory;
   seriesId?: string; // Optional ID linking recurring bills together
+}
+
+export enum BillFrequency {
+  MONTHLY = 1,
+  QUARTERLY = 3,
+  SEMIANNUAL = 6,
+  ANNUAL = 12
 }
 
 export enum BillCategory {

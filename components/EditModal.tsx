@@ -1,15 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, DollarSign, Tag, Repeat } from 'lucide-react';
-import { Bill, BillCategory, CATEGORY_ICONS } from '../types';
+import { X, Calendar, DollarSign, Tag, Repeat, AlertCircle, Clock } from 'lucide-react';
+import { Bill, BillCategory, CATEGORY_ICONS, BillFrequency } from '../types';
 
 interface EditModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (bill: Bill, isNew: boolean, createRecurringSeries: boolean) => void;
+  onSave: (bill: Bill, isNew: boolean, createRecurringSeries: boolean, updateFuture: boolean) => void;
   onDelete: (id: string) => void;
   initialBill: Bill | null;
   currentDateContext: Date;
+  existingBills: Bill[]; // Needed for duplicate check
 }
 
 export const EditModal: React.FC<EditModalProps> = ({ 
@@ -18,23 +19,28 @@ export const EditModal: React.FC<EditModalProps> = ({
   onSave, 
   onDelete,
   initialBill,
-  currentDateContext
+  currentDateContext,
+  existingBills
 }) => {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<BillCategory>(BillCategory.OTHER);
   const [date, setDate] = useState('');
   const [isRecurring, setIsRecurring] = useState(false);
+  const [frequency, setFrequency] = useState<BillFrequency>(BillFrequency.MONTHLY);
   const [isPaid, setIsPaid] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      setError(null);
       if (initialBill) {
         setName(initialBill.name);
         setAmount(initialBill.amount.toString());
         setCategory(initialBill.category);
         setDate(initialBill.dueDate.split('T')[0]);
         setIsRecurring(initialBill.isRecurring);
+        setFrequency(initialBill.frequency || BillFrequency.MONTHLY);
         setIsPaid(initialBill.isPaid);
       } else {
         // Reset for new bill
@@ -43,7 +49,6 @@ export const EditModal: React.FC<EditModalProps> = ({
         setCategory(BillCategory.OTHER);
         // Default to today or the first of the currently viewed month
         const defaultDate = new Date(currentDateContext);
-        // If we are looking at a future/past month, set default day to 1st, else today
         const today = new Date();
         if (defaultDate.getMonth() === today.getMonth() && defaultDate.getFullYear() === today.getFullYear()) {
             setDate(today.toISOString().split('T')[0]);
@@ -52,29 +57,70 @@ export const EditModal: React.FC<EditModalProps> = ({
             setDate(defaultDate.toISOString().split('T')[0]);
         }
         setIsRecurring(false);
+        setFrequency(BillFrequency.MONTHLY);
         setIsPaid(false);
       }
     }
   }, [isOpen, initialBill, currentDateContext]);
 
+  const validateDuplicate = (checkName: string, checkDateStr: string): boolean => {
+    const checkDate = new Date(checkDateStr);
+    const duplicate = existingBills.find(b => {
+        // Skip self if editing
+        if (initialBill && b.id === initialBill.id) return false;
+        
+        const bDate = new Date(b.dueDate);
+        const sameMonth = bDate.getMonth() === checkDate.getMonth();
+        const sameYear = bDate.getFullYear() === checkDate.getFullYear();
+        const sameName = b.name.trim().toLowerCase() === checkName.trim().toLowerCase();
+        
+        return sameMonth && sameYear && sameName;
+    });
+
+    return !!duplicate;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !amount || !date) return;
+    setError(null);
+
+    if (!name || !amount || !date) {
+        setError("Wypełnij wszystkie pola.");
+        return;
+    }
+
+    // Duplicate Check
+    if (validateDuplicate(name, date)) {
+        setError(`Rachunek "${name}" już istnieje w tym miesiącu.`);
+        return;
+    }
 
     const billData: Bill = {
-      id: initialBill ? initialBill.id : '', // ID will be assigned by Database or App logic if new
-      name,
+      id: initialBill ? initialBill.id : '',
+      name: name.trim(),
       amount: parseFloat(amount),
       category,
       dueDate: new Date(date).toISOString(),
       isRecurring,
-      isPaid
+      frequency: isRecurring ? frequency : undefined,
+      isPaid,
+      seriesId: initialBill?.seriesId
     };
 
-    // If it's a new bill and marked recurring, we might want to generate future entries
+    let updateFuture = false;
+    // Logic to ask about updating series if editing a recurring bill
+    if (initialBill && initialBill.seriesId && initialBill.isRecurring) {
+        // Simple confirmation using window for now, could be a custom UI modal later
+        // Only ask if critical data changed
+        if (initialBill.amount !== parseFloat(amount) || initialBill.name !== name) {
+             const result = window.confirm("To rachunek cykliczny. Czy chcesz zaktualizować cenę/nazwę również dla przyszłych rachunków z tej serii?");
+             updateFuture = result;
+        }
+    }
+
     const createSeries = !initialBill && isRecurring;
     
-    onSave(billData, !initialBill, createSeries);
+    onSave(billData, !initialBill, createSeries, updateFuture);
     onClose();
   };
 
@@ -82,14 +128,12 @@ export const EditModal: React.FC<EditModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-black/60 backdrop-blur-md transition-opacity" 
         onClick={onClose}
       />
 
-      {/* Modal Content */}
-      <div className="relative w-full sm:max-w-md bg-[#1a1a1a] sm:rounded-3xl rounded-t-3xl border-t sm:border border-white/10 shadow-2xl p-6 animate-slide-up">
+      <div className="relative w-full sm:max-w-md bg-[#1a1a1a] sm:rounded-3xl rounded-t-3xl border-t sm:border border-white/10 shadow-2xl p-6 animate-slide-up max-h-[90vh] overflow-y-auto no-scrollbar">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
             {initialBill ? 'Edytuj Rachunek' : 'Nowy Rachunek'}
@@ -99,7 +143,14 @@ export const EditModal: React.FC<EditModalProps> = ({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {error && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 text-sm">
+                <AlertCircle size={18} />
+                <span>{error}</span>
+            </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
           {/* Amount Input */}
           <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -160,21 +211,50 @@ export const EditModal: React.FC<EditModalProps> = ({
             </div>
           </div>
 
-          {/* Toggles */}
-          <div className="flex justify-between items-center p-4 bg-white/5 rounded-2xl border border-white/5">
-             <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${isRecurring ? 'bg-blue-500/20 text-blue-400' : 'bg-white/5 text-white/40'}`}>
-                    <Repeat size={20} />
+          {/* Recurring Toggles */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center p-4 bg-white/5 rounded-2xl border border-white/5">
+                <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${isRecurring ? 'bg-blue-500/20 text-blue-400' : 'bg-white/5 text-white/40'}`}>
+                        <Repeat size={20} />
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-sm font-medium text-white">Powtarzalny</span>
+                        <span className="text-xs text-white/40">Tworzy serię rachunków</span>
+                    </div>
                 </div>
-                <div className="flex flex-col">
-                    <span className="text-sm font-medium text-white">Powtarzalny</span>
-                    <span className="text-xs text-white/40">Co miesiąc</span>
-                </div>
-             </div>
-             <label className="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} className="sr-only peer" />
-                <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
+                <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} className="sr-only peer" />
+                    <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                </label>
+            </div>
+            
+            {/* Frequency Selector - Only if Recurring */}
+            {isRecurring && (
+                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5 animate-slide-up">
+                    <div className="flex items-center gap-2 mb-3 text-white/60">
+                         <Clock size={14} />
+                         <span className="text-xs font-bold uppercase tracking-wide">Częstotliwość</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        {[
+                            { label: 'Co miesiąc', val: BillFrequency.MONTHLY },
+                            { label: 'Co kwartał', val: BillFrequency.QUARTERLY },
+                            { label: 'Co pół roku', val: BillFrequency.SEMIANNUAL },
+                            { label: 'Co rok', val: BillFrequency.ANNUAL },
+                        ].map((opt) => (
+                            <button
+                                key={opt.val}
+                                type="button"
+                                onClick={() => setFrequency(opt.val)}
+                                className={`py-2 px-3 rounded-xl text-xs font-medium transition-all ${frequency === opt.val ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}
+                            >
+                                {opt.label}
+                            </button>
+                        ))}
+                    </div>
+                 </div>
+            )}
           </div>
 
           {/* Actions */}
