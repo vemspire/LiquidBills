@@ -1,4 +1,5 @@
 
+
 export interface Bill {
   id: string;
   name: string;
@@ -21,6 +22,7 @@ export enum BillFrequency {
 export enum BillCategory {
   HOUSE = 'Dom',
   MEDIA = 'Media',
+  INSURANCE = 'Ubezpieczenia',
   SUBSCRIPTION = 'Subskrypcje',
   CREDIT = 'Kredyt',
   OTHER = 'Inne'
@@ -29,6 +31,7 @@ export enum BillCategory {
 export const CATEGORY_ICONS: Record<BillCategory, string> = {
   [BillCategory.HOUSE]: '🏠',
   [BillCategory.MEDIA]: '⚡',
+  [BillCategory.INSURANCE]: '🛡️',
   [BillCategory.SUBSCRIPTION]: '🎬',
   [BillCategory.CREDIT]: '🏦',
   [BillCategory.OTHER]: '📦',

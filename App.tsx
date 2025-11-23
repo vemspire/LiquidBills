@@ -286,8 +286,7 @@ const App: React.FC = () => {
                 const freq = billData.frequency || BillFrequency.MONTHLY;
                 
                 // Calculate roughly 1 year worth of bills based on frequency
-                // Monthly = 12, Quarterly = 4, Semiannual = 2, Annual = 2 (Just to be safe for a year view)
-                const count = Math.ceil(12 / freq) + 1; // +1 to cover edge cases
+                const count = Math.ceil(12 / freq) + 1;
 
                 for (let i = 0; i < count; i++) {
                     const nextDate = new Date(startDate);
@@ -304,20 +303,7 @@ const App: React.FC = () => {
                 if (error) throw error;
                 
                 if (data) {
-                    const addedBills = data.map((item: any) => ({
-                        id: item.id,
-                        name: item.name,
-                        amount: item.amount,
-                        dueDate: item.due_date,
-                        isPaid: item.is_paid,
-                        isRecurring: item.is_recurring,
-                        frequency: item.frequency,
-                        category: item.category,
-                        seriesId: item.series_id
-                    }));
-                    const newTotal = [...bills, ...addedBills];
-                    setBills(newTotal);
-                    localStorage.setItem(CACHE_KEY, JSON.stringify(newTotal));
+                    await fetchBills(true); // Full refresh to get IDs
                 }
 
             } else {
@@ -339,8 +325,7 @@ const App: React.FC = () => {
             const originalBill = bills.find(b => b.id === billData.id);
             const wasRecurring = originalBill?.isRecurring;
             const isNowRecurring = billData.isRecurring;
-            let currentBills = [...bills];
-
+            
             // 1. Handle Turning OFF Recurring
             if (wasRecurring && !isNowRecurring) {
                 const confirmed = confirm("Wyłączyłeś opcję 'Powtarzalny'. Czy chcesz usunąć wszystkie przyszłe rachunki z tej serii?");
@@ -354,7 +339,6 @@ const App: React.FC = () => {
                             .eq('series_id', originalBill.seriesId)
                             .gt('due_date', currentDueDate);
                     } else {
-                        // Fallback logic if series_id missing
                         deleteQuery = deleteQuery
                             .eq('name', originalBill?.name)
                             .eq('amount', originalBill?.amount)
@@ -363,50 +347,68 @@ const App: React.FC = () => {
 
                     const { error: deleteError } = await deleteQuery;
                     if (deleteError) throw deleteError;
-
-                    // Update Local State
-                    currentBills = currentBills.filter(b => {
-                        if (b.id === billData.id) return true;
-                        const bDate = new Date(b.dueDate).getTime();
-                        const cDate = new Date(currentDueDate).getTime();
-                        if (bDate <= cDate) return true;
-                        if (originalBill?.seriesId) {
-                            return b.seriesId !== originalBill.seriesId;
-                        }
-                        return true;
-                    });
                     
-                    billData.seriesId = undefined; // Break link
+                    // Unlink the series ID from this bill since it's now solo
+                    billData.seriesId = undefined; 
                 }
             }
 
-            // 2. Handle Update Series (e.g. Price Change)
+            // 2. Handle Update Series (e.g. Price Change, Frequency Change)
             if (wasRecurring && isNowRecurring && updateFuture && originalBill?.seriesId) {
-                 // Update ALL bills in series that have date >= current bill date
-                 const { error } = await supabase
+                 
+                 // Strategy: Update current -> Delete Future -> Regenerate Future
+                 // This ensures dates and amounts are consistent if frequency or price changed
+                 
+                 // A. Update Current Bill
+                 const { error: updateError } = await supabase
                     .from('bills')
-                    .update({
-                        name: billData.name,
-                        amount: billData.amount,
-                        category: billData.category,
-                        frequency: billData.frequency
-                    })
-                    .eq('series_id', originalBill.seriesId)
-                    .gte('due_date', billData.dueDate); // Only future & current
-                
-                if (error) throw error;
+                    .update(preparePayload(billData))
+                    .eq('id', billData.id);
 
-                // Update Local State
-                currentBills = currentBills.map(b => {
-                    // Check if part of series and date is same or future
-                    if (b.seriesId === originalBill.seriesId && new Date(b.dueDate) >= new Date(billData.dueDate)) {
-                         return { ...b, name: billData.name, amount: billData.amount, category: billData.category, frequency: billData.frequency };
-                    }
-                    return b;
-                });
-            } else {
-                // Update SINGLE Bill
+                 if (updateError) throw updateError;
+
+                 // B. Delete Future Bills in this series
+                 const { error: deleteError } = await supabase
+                    .from('bills')
+                    .delete()
+                    .eq('series_id', originalBill.seriesId)
+                    .gt('due_date', billData.dueDate); // strict greater than
+                 
+                 if (deleteError) throw deleteError;
+
+                 // C. Regenerate Future Bills
+                 const newBillsPayload = [];
+                 const startDate = new Date(billData.dueDate);
+                 const freq = billData.frequency || BillFrequency.MONTHLY;
+                 
+                 // Generate 1 year worth from current bill
+                 const count = Math.ceil(12 / freq); 
+
+                 for (let i = 1; i <= count; i++) { // Start from 1, future only
+                    const nextDate = new Date(startDate);
+                    nextDate.setMonth(startDate.getMonth() + (i * freq));
+                    
+                    newBillsPayload.push({
+                        ...preparePayload({ ...billData, seriesId: originalBill.seriesId }),
+                        due_date: nextDate.toISOString(),
+                        is_paid: false // Future bills default to unpaid
+                    });
+                 }
+
+                 if (newBillsPayload.length > 0) {
+                     const { error: insertError } = await supabase.from('bills').insert(newBillsPayload);
+                     if (insertError) throw insertError;
+                 }
+                 
+                 await fetchBills(true); // Full refresh required
+                 return; // Exit
+            }
+            
+            // 3. Simple Update (Single Bill or Series NO update future)
+            if (!(wasRecurring && isNowRecurring && updateFuture && originalBill?.seriesId)) {
                 const payload = preparePayload(billData);
+                // If it was recurring and now is not, we already handled delete future, 
+                // but we must ensure this specific bill is updated correctly to not be series
                 if (wasRecurring && !isNowRecurring) {
                     payload.series_id = null;
                 }
@@ -419,17 +421,16 @@ const App: React.FC = () => {
                 if (error) throw error;
 
                  // Update Local State Single
-                 currentBills = currentBills.map(b => b.id === billData.id ? billData : b);
+                 const currentBills = bills.map(b => b.id === billData.id ? billData : b);
+                 setBills(currentBills);
+                 localStorage.setItem(CACHE_KEY, JSON.stringify(currentBills));
             }
-
-            setBills(currentBills);
-            localStorage.setItem(CACHE_KEY, JSON.stringify(currentBills));
         }
         setSyncSuccess(true);
     } catch (err) {
         console.error("Error saving bill:", err);
         setSyncSuccess(false);
-        alert("Wystąpił błąd podczas zapisywania.");
+        alert("Wystąpił błąd podczas zapisywania. Upewnij się, że dodałeś kolumnę 'frequency' do bazy danych.");
     } finally {
         setIsSyncing(false);
     }
