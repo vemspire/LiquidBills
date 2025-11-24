@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, ChevronLeft, ChevronRight, PieChart, LayoutDashboard, CalendarRange, List, Loader2, WifiOff, DownloadCloud, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Bill, MonthlyStats, BillFrequency } from './types';
@@ -552,7 +551,7 @@ const App: React.FC = () => {
         ) : viewMode === 'month' ? (
             <>
                 {/* Dashboard Cards (Month View) */}
-                <div className="px-6 mt-4 grid grid-cols-2 gap-4 animate-slide-up">
+                <div className="px-6 mt-4 grid grid-cols-2 gap-4 animate-enter-ios" style={{ animationDelay: '0ms' }}>
                 <GlassCard className="p-5 flex flex-col justify-between h-32 bg-green-900/10 border-green-500/20">
                     <div className="flex justify-between items-start">
                     <div className="p-2 rounded-full bg-green-500/20 text-green-400">
@@ -584,12 +583,12 @@ const App: React.FC = () => {
 
                 {/* List Section */}
                 <div className="px-6 mt-8">
-                <h2 className="text-sm font-bold text-white/40 uppercase tracking-widest mb-4 ml-1 flex justify-between">
+                <h2 className="text-sm font-bold text-white/40 uppercase tracking-widest mb-4 ml-1 flex justify-between animate-enter-ios" style={{ animationDelay: '100ms' }}>
                     <span>Twoje Rachunki</span>
                 </h2>
                 
                 {filteredBills.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-center opacity-50">
+                    <div className="flex flex-col items-center justify-center py-12 text-center opacity-50 animate-enter-ios" style={{ animationDelay: '150ms' }}>
                         <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
                             <LayoutDashboard size={32} className="text-white/30" />
                         </div>
@@ -597,11 +596,12 @@ const App: React.FC = () => {
                         <p className="text-xs text-white/30 mt-1">Dodaj pierwszy przyciskiem poniżej.</p>
                     </div>
                 ) : (
-                    <div className="space-y-4">
-                        {filteredBills.map(bill => (
+                    <div className="space-y-4 pb-8">
+                        {filteredBills.map((bill, index) => (
                             <BillItem 
                                 key={bill.id} 
                                 bill={bill} 
+                                index={index}
                                 onTogglePaid={toggleBillPaid}
                                 onEdit={openEditModal}
                             />

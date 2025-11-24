@@ -23,13 +23,21 @@ export const GlassCard: React.FC<GlassCardProps> = ({
         shadow-lg shadow-black/10
         rounded-3xl
         transition-all duration-300
-        ${interactive ? 'active:scale-95 cursor-pointer hover:bg-white/15' : ''}
+        group
+        ${interactive ? 'active:scale-[0.98] cursor-pointer hover:bg-white/15' : ''}
         ${className}
       `}
     >
-      {/* Subtle shine effect */}
-      <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
-      {children}
+      {/* Shimmer Effect Overlay */}
+      <div className="absolute inset-0 -translate-x-full group-hover:animate-shimmer bg-gradient-to-r from-transparent via-white/5 to-transparent pointer-events-none z-0" />
+      
+      {/* Top Shine */}
+      <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/5 to-transparent pointer-events-none z-0" />
+      
+      {/* Content Container */}
+      <div className="relative z-10">
+        {children}
+      </div>
     </div>
   );
 };
