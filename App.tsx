@@ -455,20 +455,21 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="relative min-h-screen w-full bg-black text-white font-sans overflow-x-hidden selection:bg-purple-500/30">
+    <div className="relative min-h-screen w-full text-white font-sans selection:bg-purple-500/30">
       
-      {/* Dynamic Background */}
-      <div className="fixed inset-0 z-0">
+      {/* Dynamic Background - Fixed to screen, deepest Z-index */}
+      <div className="fixed inset-0 -z-10 bg-black">
          <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/30 rounded-full blur-[120px] animate-blob"></div>
          <div className="absolute top-[40%] right-[-10%] w-[400px] h-[400px] bg-pink-600/20 rounded-full blur-[100px] animate-blob animation-delay-2000"></div>
          <div className="absolute bottom-[-10%] left-[20%] w-[600px] h-[600px] bg-purple-900/30 rounded-full blur-[120px] animate-blob animation-delay-4000"></div>
          <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150"></div>
       </div>
 
-      <div className="relative z-10 max-w-lg mx-auto pb-24">
+      {/* Main Content Container - Handles Safe Area Bottom Padding */}
+      <div className="relative z-10 max-w-lg mx-auto pb-[calc(6rem+env(safe-area-inset-bottom))]">
         
-        {/* Header Section */}
-        <header className="pt-12 px-6 pb-6 sticky top-0 z-20 bg-black/5 backdrop-blur-md border-b border-white/5 transition-all">
+        {/* Header Section - Handles Safe Area Top Padding */}
+        <header className="pt-[calc(3rem+env(safe-area-inset-top))] px-6 pb-6 sticky top-0 z-20 bg-black/5 backdrop-blur-md border-b border-white/5 transition-all">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
@@ -604,7 +605,7 @@ const App: React.FC = () => {
                         <p className="text-xs text-white/30 mt-1">Dodaj pierwszy przyciskiem poniżej.</p>
                     </div>
                 ) : (
-                    <div className="space-y-4 pb-20">
+                    <div className="space-y-4">
                         {filteredBills.map(bill => (
                             <BillItem 
                                 key={bill.id} 
@@ -619,21 +620,26 @@ const App: React.FC = () => {
             </>
         ) : (
             /* Year View */
-            <div className="px-6 mt-4 pb-20">
+            <div className="px-6 mt-4">
                 <YearlySummary bills={bills} year={currentDate.getFullYear()} />
             </div>
         )}
 
-        {/* Floating Action Button - Only in Month View */}
+        {/* Floating Action Button - Fixed above Safe Area */}
         {viewMode === 'month' && !loading && (
-            <div className="fixed bottom-8 left-0 right-0 flex justify-center z-40 pointer-events-none">
-                <button 
-                    onClick={openAddModal}
-                    className="pointer-events-auto group flex items-center justify-center w-16 h-16 bg-white text-black rounded-full shadow-[0_0_40px_-10px_rgba(255,255,255,0.5)] hover:scale-110 active:scale-95 transition-all duration-300"
-                >
-                    <Plus size={32} strokeWidth={2.5} className="group-hover:rotate-90 transition-transform duration-300" />
-                </button>
-            </div>
+            <>
+                {/* Gradient Fade at bottom for smoother scroll effect */}
+                <div className="fixed bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black via-black/80 to-transparent z-30 pointer-events-none" />
+                
+                <div className="fixed bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex justify-center z-50 pointer-events-none">
+                    <button 
+                        onClick={openAddModal}
+                        className="pointer-events-auto group flex items-center justify-center w-16 h-16 bg-white text-black rounded-full shadow-[0_0_40px_-10px_rgba(255,255,255,0.5)] hover:scale-110 active:scale-95 transition-all duration-300"
+                    >
+                        <Plus size={32} strokeWidth={2.5} className="group-hover:rotate-90 transition-transform duration-300" />
+                    </button>
+                </div>
+            </>
         )}
 
       </div>
