@@ -5,30 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#1e1b4b">
     <title>Moje Rachunki</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-      html, body {
+      html {
+        height: 100%;
+        /* This gradient fixes the visual 'rubber-banding' gap on iOS */
+        background: linear-gradient(to bottom, #1e1b4b 0%, #000000 100%);
+        background-attachment: fixed;
+      }
+      
+      body {
         height: 100%;
         width: 100%;
         margin: 0;
         padding: 0;
-        background-color: #000000; /* Prevents white bars during rubber-banding */
         font-family: 'Inter', sans-serif;
         color: white;
         -webkit-tap-highlight-color: transparent;
-        overflow-x: hidden; /* Prevent horizontal scroll */
+        overflow-x: hidden;
+        /* Transparent body to let the html gradient and fixed blobs show through */
+        background-color: transparent;
       }
       
       #root {
         min-height: 100%;
         display: flex;
         flex-direction: column;
+        position: relative;
+        z-index: 1;
       }
 
-      /* Custom scrollbar hiding for cleaner mobile look */
+      /* Custom scrollbar hiding */
       .no-scrollbar::-webkit-scrollbar {
         display: none;
       }
@@ -49,7 +59,7 @@
                         }
                     },
                     animation: {
-                        'blob': 'blob 7s infinite',
+                        'blob': 'blob 10s infinite', // Slower, smoother animation
                         'slide-up': 'slideUp 0.3s ease-out forwards',
                     },
                     keyframes: {
@@ -68,22 +78,40 @@
             }
         }
     </script>
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
-    "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.84.0",
-    "vite": "https://aistudiocdn.com/vite@^7.2.4",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
-    "@capacitor/cli": "https://aistudiocdn.com/@capacitor/cli@^7.4.4",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/"
-  }
-}
-</script>
-</head>
+    <!-- Vite Imports -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://aistudiocdn.com/react@^19.2.0",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+        "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+        "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.84.0",
+        "vite": "https://aistudiocdn.com/vite@^7.2.4",
+        "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+        "@capacitor/cli": "https://aistudiocdn.com/@capacitor/cli@^7.4.4",
+        "react/": "https://aistudiocdn.com/react@^19.2.0/"
+      }
+    }
+    </script>
+  </head>
   <body>
+    <!-- 
+      FIXED BACKGROUND LAYERS 
+      Placed here to be visible immediately and cover the whole screen including under the notches/home bar
+    -->
+    <div style="position: fixed; inset: 0; z-index: -10; overflow: hidden; pointer-events: none;">
+         <!-- Deep Dark Base -->
+         <div class="absolute inset-0 bg-black/60"></div>
+         
+         <!-- Animated Blobs with higher opacity -->
+         <div class="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600 rounded-full blur-[120px] opacity-50 animate-blob"></div>
+         <div class="absolute top-[40%] right-[-10%] w-[400px] h-[400px] bg-pink-600 rounded-full blur-[100px] opacity-40 animate-blob animation-delay-2000"></div>
+         <div class="absolute bottom-[-10%] left-[20%] w-[600px] h-[600px] bg-purple-800 rounded-full blur-[120px] opacity-50 animate-blob animation-delay-4000"></div>
+         
+         <!-- Noise Texture for "Liquid" feel -->
+         <div class="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150"></div>
+    </div>
+
     <div id="root">
         <script type="module" src="/index.tsx"></script>
     </div>

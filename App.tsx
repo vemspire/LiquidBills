@@ -457,14 +457,6 @@ const App: React.FC = () => {
   return (
     <div className="relative min-h-screen w-full text-white font-sans selection:bg-purple-500/30">
       
-      {/* Dynamic Background - Fixed to screen, deepest Z-index */}
-      <div className="fixed inset-0 -z-10 bg-black">
-         <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/30 rounded-full blur-[120px] animate-blob"></div>
-         <div className="absolute top-[40%] right-[-10%] w-[400px] h-[400px] bg-pink-600/20 rounded-full blur-[100px] animate-blob animation-delay-2000"></div>
-         <div className="absolute bottom-[-10%] left-[20%] w-[600px] h-[600px] bg-purple-900/30 rounded-full blur-[120px] animate-blob animation-delay-4000"></div>
-         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150"></div>
-      </div>
-
       {/* Main Content Container - Handles Safe Area Bottom Padding */}
       <div className="relative z-10 max-w-lg mx-auto pb-[calc(6rem+env(safe-area-inset-bottom))]">
         
