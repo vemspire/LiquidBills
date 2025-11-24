@@ -457,10 +457,10 @@ const App: React.FC = () => {
     <div className="relative min-h-screen w-full text-white font-sans selection:bg-purple-500/30">
       
       {/* Main Content Container - Handles Safe Area Bottom Padding */}
-      <div className="relative z-10 max-w-lg mx-auto pb-[calc(6rem+env(safe-area-inset-bottom))]">
+      <div className="relative z-10 max-w-lg mx-auto pb-24">
         
-        {/* Header Section - Handles Safe Area Top Padding */}
-        <header className="pt-[calc(3rem+env(safe-area-inset-top))] px-6 pb-6 sticky top-0 z-20 bg-black/5 backdrop-blur-md border-b border-white/5 transition-all">
+        {/* Header Section - Handles Safe Area Top Padding via index.html/body padding */}
+        <header className="pt-6 px-6 pb-6 sticky top-0 z-20 bg-black/5 backdrop-blur-md border-b border-white/5 transition-all">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
@@ -623,7 +623,7 @@ const App: React.FC = () => {
                 {/* Gradient Fade at bottom for smoother scroll effect */}
                 <div className="fixed bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black via-black/80 to-transparent z-30 pointer-events-none" />
                 
-                <div className="fixed bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex justify-center z-50 pointer-events-none">
+                <div className="fixed bottom-8 left-0 right-0 flex justify-center z-50 pointer-events-none">
                     <button 
                         onClick={openAddModal}
                         className="pointer-events-auto group flex items-center justify-center w-16 h-16 bg-white text-black rounded-full shadow-[0_0_40px_-10px_rgba(255,255,255,0.5)] hover:scale-110 active:scale-95 transition-all duration-300"
